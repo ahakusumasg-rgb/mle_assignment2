@@ -91,10 +91,14 @@ def process_features_gold_table(snapshot_date_str, gold_label_store_directory, s
      .otherwise("Unknown"))
     df = df.drop("Age") # drop as it's now represented by the Age Bucket
 
-    # 8. Drop label columns as label available in different datamart
+    # 8. Feature engineering #3 - affordability and income scale
+    df = df.withColumn("emi_to_salary",F.when(col("Monthly_Inhand_Salary") > 0, col("Total_EMI_per_month") / col("Monthly_Inhand_Salary")))
+    df = df.withColumn("log_annual_income", F.log1p(col("Annual_Income")))
+    
+    # 9. Drop label columns as label available in different datamart
     df = df.drop("label", "label_def")
 
-    # 9. Save
+    # 10. Save
     partition_name = "gold_feature_store_" + snapshot_date_str.replace('-','_') + '.parquet'
     df.write.mode("overwrite").parquet(gold_feature_store_directory + partition_name)
     print('saved to:', gold_feature_store_directory + partition_name)
