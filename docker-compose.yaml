@@ -1,0 +1,93 @@
+# Airflow + JupyterLab.
+x-airflow-common: &airflow-common
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: assignment_2:latest
+  environment: &airflow-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__FERNET_KEY: ""
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
+    AIRFLOW__API_AUTH__JWT_SECRET: learning-only-secret
+    # Local learning only: no login screen.
+    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "true"
+    PYTHONPATH: /opt/airflow
+    PROJECT_ROOT: /opt/airflow
+  user: "50000:0"
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./src:/opt/airflow/src
+    - ./data:/opt/airflow/data
+    - ./model_store:/opt/airflow/model_store
+    - airflow-logs:/opt/airflow/logs
+    - ./utils:/opt/airflow/utils
+    - ./datamart:/opt/airflow/datamart
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 10
+
+  airflow-init:
+    <<: *airflow-common
+    command: ["db", "migrate"]
+    # Make the named log volume writable by the airflow user
+    user: "0:0"
+    entrypoint: ["/bin/bash", "-c", "chown -R 50000:0 /opt/airflow/logs && exec su airflow -c 'airflow db migrate'"]
+
+  airflow-apiserver:
+    <<: *airflow-common
+    command: api-server
+    ports:
+      - "8080:8080"
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-dag-processor:
+    <<: *airflow-common
+    command: dag-processor
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  jupyter:
+    build:
+      context: .
+      dockerfile: Dockerfile.jupyter
+    image: assignment_2-jupyter:latest
+    command: >
+      jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root
+      --ServerApp.token='' --ServerApp.password=''
+    environment:
+      PYTHONPATH: /workspace
+      PROJECT_ROOT: /workspace
+    ports:
+      - "127.0.0.1:8888:8888"
+    volumes:
+      - .:/workspace
+
+volumes:
+  postgres-db:
+  airflow-logs:
