@@ -1,0 +1,26 @@
+# macOS
+.DS_Store
+.Trash-0/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+env/
+
+# Environment/secrets (if you add any later)
+.env
+
+# Not mine to publish
+sample_assignments/
+_lab5_reference/
+Assignment 2.pdf
+
+# Generated output
+datamart/
+model_bank/
+*.pkl
