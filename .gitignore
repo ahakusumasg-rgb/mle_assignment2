@@ -25,3 +25,6 @@ datamart/
 model_bank/
 *.pkl
 Untitled*.ipynb
+
+# Mine not to publish
+docs/

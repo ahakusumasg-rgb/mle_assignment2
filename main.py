@@ -127,10 +127,13 @@ for d in gold_directories:
 for date_str in dates_str_lst:
     utils.data_processing_gold_table.process_labels_gold_table(date_str, silver_loan_daily_directory, gold_label_store_directory, spark, dpd = 30, mob = 6)
 
-for date_str in dates_str_lst:    
-    utils.data_processing_gold_table.process_features_gold_table(date_str, gold_label_store_directory, silver_clickstream_directory, \
+# feature store is keyed by application month; clickstream only exists up to 2024-06
+feature_dates_str_lst = [d for d in dates_str_lst if d <= "2024-06-01"]
+
+for date_str in feature_dates_str_lst:
+    utils.data_processing_gold_table.process_features_gold_table(date_str, silver_loan_daily_directory, silver_clickstream_directory, \
                                                                silver_attributes_directory, silver_financials_directory, \
-                                                               gold_feature_store_directory, spark, mob = 6)
+                                                               gold_feature_store_directory, spark)
 
 
 folder_path = gold_label_store_directory

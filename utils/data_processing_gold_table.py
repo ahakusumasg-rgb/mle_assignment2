@@ -46,40 +46,33 @@ def process_labels_gold_table(snapshot_date_str, silver_loan_daily_directory, go
     
     return df
 
-def process_features_gold_table(snapshot_date_str, gold_label_store_directory, silver_clickstream_directory, \
-                                                               silver_attributes_directory, silver_financials_directory, \
-                                                               gold_feature_store_directory, spark, mob = 6):
+def process_features_gold_table(snapshot_date_str, silver_loan_daily_directory, silver_clickstream_directory, \
+                                                   silver_attributes_directory, silver_financials_directory, \
+                                                   gold_feature_store_directory, spark):
 
-    # 1. Read month label partition
-    partition_name = "gold_label_store_" + snapshot_date_str.replace('-','_') + '.parquet'
-    df_label = spark.read.parquet(gold_label_store_directory + partition_name)
+    # snapshot_date_str is the APPLICATION month (A). No label store needed, so this also works at scoring time
+    suffix = snapshot_date_str.replace('-','_') + '.parquet'
 
-    # 2. Skip months where no loan has reached mob=6 yet
-    if df_label.count() == 0:
-        print(snapshot_date_str, 'skipped - no loans at mob =', mob, 'yet')
+    # 1. Anchor: loans that start this month (mob 0 = application month)
+    df_loan = spark.read.parquet(silver_loan_daily_directory + "silver_loan_daily_" + suffix)
+    df = df_loan.filter(col("mob") == 0).select("loan_id", "Customer_ID", "snapshot_date")
+
+    # 2. Skip months with no new loans
+    if df.count() == 0:
+        print(snapshot_date_str, 'skipped - no loans start this month')
         return None
 
-    # 3. Derive the application date from mob
-    loan_start_date = datetime.strptime(snapshot_date_str, "%Y-%m-%d") - relativedelta(months=mob)
-    loan_start_date_str = loan_start_date.strftime("%Y-%m-%d")
-    suffix = loan_start_date_str.replace('-','_') + '.parquet'
-
-    # 4. Read the three silver sources at the loan application date, not snapshot_date_str
+    # 3. Read the three silver sources at the same application month
     df_click = spark.read.parquet(silver_clickstream_directory + "silver_clickstream_daily_" + suffix).drop("snapshot_date")
     df_attr  = spark.read.parquet(silver_attributes_directory + "silver_attributes_daily_" + suffix).drop("snapshot_date")
     df_fin   = spark.read.parquet(silver_financials_directory + "silver_financials_daily_" + suffix).drop("snapshot_date")
 
-    # 5. Join, label as the anchor (left joins preserve every labeled loan)
-    df = df_label.join(df_attr, on="Customer_ID", how="left")
+    # 4. Join, new loans are the anchor (left joins preserve every loan)
+    df = df.join(df_attr, on="Customer_ID", how="left")
     df = df.join(df_fin, on="Customer_ID", how="left")
     df = df.join(df_click, on="Customer_ID", how="left")
 
-    # 6. Feature engineering #1 - has_clickstream flag
-    #df = df.withColumn("has_clickstream", F.when(col("fe_1").isNotNull(), 1).otherwise(0))
-    # decided to cancel this feature that apparently all records come with "1", as clickstream data only available from 2023-01-01
-    # to 2024-06-01 (first 18 months), while the last 7 months aren't there, which anyway being excluded due to MOB
-
-    # 7. Feature engineering #2 - based on Singapore's MOM person lifecycle 
+    # 5. Feature engineering #1 - based on Singapore's MOM person lifecycle
     df = df.withColumn("age_bucket",
     F.when(col("Age").isNull(), "Unknown")
      .when((col("Age") >= 15) & (col("Age") <= 24), "15-24_Pre_Work_Early_Entrants")
@@ -91,16 +84,13 @@ def process_features_gold_table(snapshot_date_str, gold_label_store_directory, s
      .otherwise("Unknown"))
     df = df.drop("Age") # drop as it's now represented by the Age Bucket
 
-    # 8. Feature engineering #3 - affordability and income scale
+    # 6. Feature engineering #2 - affordability and income scale
     df = df.withColumn("emi_to_salary",F.when(col("Monthly_Inhand_Salary") > 0, col("Total_EMI_per_month") / col("Monthly_Inhand_Salary")))
     df = df.withColumn("log_annual_income", F.log1p(col("Annual_Income")))
-    
-    # 9. Drop label columns as label available in different datamart
-    df = df.drop("label", "label_def")
 
-    # 10. Save
-    partition_name = "gold_feature_store_" + snapshot_date_str.replace('-','_') + '.parquet'
+    # 7. Save, one partition per application month
+    partition_name = "gold_feature_store_" + suffix
     df.write.mode("overwrite").parquet(gold_feature_store_directory + partition_name)
     print('saved to:', gold_feature_store_directory + partition_name)
-    
+
     return df
