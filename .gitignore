@@ -28,3 +28,4 @@ Untitled*.ipynb
 
 # Mine not to publish
 docs/
+model_store/*/
