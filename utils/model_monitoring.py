@@ -122,7 +122,9 @@ def performance_metrics(g):
             "ks": utils.model_training.ks_stat(y, s) if len(np.unique(y)) == 2 else np.nan,
             "flagged_rate": float(flag.mean()),
             "precision": float(y[flag].mean()) if flag.any() else np.nan,
-            "recall": float(flag[y == 1].mean()) if (y == 1).any() else np.nan}
+            "recall": float(flag[y == 1].mean()) if (y == 1).any() else np.nan,
+            "tp": int((flag & (y == 1)).sum()), "fp": int((flag & (y == 0)).sum()),
+            "fn": int((~flag & (y == 1)).sum()), "tn": int((~flag & (y == 0)).sum())}
 
 
 def compute_performance(run_date_str, predictions_directory, label_store_directory, model_store_directory, auc_tolerance):
@@ -162,7 +164,7 @@ def previous_breach(run_date_str, monitoring_directory):
 SUMMARY_COLS = ["run_month", "arm", "drift_cohort", "drift_model_version", "score_psi", "score_psi_status",
                 "max_feature_psi", "max_feature", "n_feature_watch", "n_feature_alert",
                 "perf_cohort", "perf_model_version", "val_auc", "n_loans", "default_rate", "auc", "ks",
-                "flagged_rate", "precision", "recall", "auc_rolling3", "expected_auc_rolling3", "auc_alert_level",
+                "flagged_rate", "precision", "recall", "tp", "fp", "fn", "tn", "auc_rolling3", "expected_auc_rolling3", "auc_alert_level",
                 "perf_breach", "perf_trigger", "psi_alert", "retrain_trigger", "status"]
 
 
