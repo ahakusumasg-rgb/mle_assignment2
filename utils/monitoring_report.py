@@ -110,7 +110,7 @@ def chart_psi(drift_sum):
 
 
 def chart_heatmap(drift_detail, top_n=15):
-    feats = drift_detail[(drift_detail["item_type"] == "feature")] if not drift_detail.empty else drift_detail
+    feats = drift_detail[(drift_detail["item_type"] == "feature") & drift_detail["alert_eligible"]] if not drift_detail.empty else drift_detail
     fig, ax = plt.subplots(figsize=(7.6, 4.6))
     ax.set_title("Feature PSI by application cohort (champion; the 15 features with the highest PSI)", fontsize=11, loc="left")
     if feats.empty:
@@ -224,9 +224,9 @@ def build_report(monitoring_directory, output_path):
              f"<div class='card'>Retrain triggers<b>{n_trig}</b></div>")
 
     cols = ["run_month", "arm", "status", "drift_cohort", "score_psi", "max_feature_psi", "perf_cohort", "n_loans", "auc", "ks",
-            "auc_rolling3", "auc_alert_level", "retrain_trigger"]
+            "auc_rolling3", "auc_alert_level", "info_feature_max_psi", "retrain_trigger"]
     heads = ["Run month", "Arm", "Status", "Scored cohort", "Score PSI", "Worst feature PSI", "Matured cohort", "Loans", "AUC", "KS",
-             "Rolling 3m AUC", "Alert level", "Retrain trigger"]
+             "Rolling 3m AUC", "Alert level", "History-mean PSI (info only)", "Retrain trigger"]
     table = table_html(summary.sort_values(["run_month", "arm"]), cols, heads)
 
     sections = [
@@ -237,7 +237,7 @@ def build_report(monitoring_directory, output_path):
             (chart_confusion(perf), "Rows are what really happened, columns are what the model said. Bottom-right: defaulters correctly flagged. Top-right: good customers flagged by mistake (false alarms). Bottom-left: defaulters the model missed. Precision is the share of flagged loans that really default; recall is the share of defaulters that get flagged; false alarms is the share of good customers that get flagged.")]),
         ("Drift (no outcomes needed, available in the month of scoring)", [
             (chart_psi(drift_sum), "PSI measures stability, not accuracy. On the features it asks whether this month's applicants look like the customers the model was trained on (input stability); on the score it asks whether the model's output has shifted (output stability). Below 0.10 is stable, 0.10 to 0.25 is watch, above 0.25 is alert. With about 500 loans a month, PSI of 0.02 to 0.05 is normal noise."),
-            (chart_heatmap(detail), "Feature-level PSI for the champion: how stable each input is compared with the training window. Darker means the applicants changed more on that feature; the colour scale reaches full red at the 0.25 alert level.")]),
+            (chart_heatmap(detail), "Feature-level PSI for the champion: how stable each input is compared with the training window. Darker means the applicants changed more on that feature; the colour scale reaches full red at the 0.25 alert level. The 20 clickstream history averages and the history length are left out here and in the alert count: their PSI is high only because history length grows for every customer at once in this dataset (see the info column in the table).")]),
     ]
     body = ""
     for title, items in sections:

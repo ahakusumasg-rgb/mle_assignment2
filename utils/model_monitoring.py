@@ -16,7 +16,9 @@ AUC_TOLERANCE = 0.05     # live rolling AUC may sit this far below the model's v
 ROLLING_COHORTS = 3      # cohorts pooled for the rolling AUC
 N_BINS = 10
 EPS = 1e-4
-
+# clickstream history averages are shown but never raise an alert: every customer's history starts in 2023-01,
+# so history length (and with it the spread of an average) grows for all customers at once.
+INFO_ONLY_FEATURES = ("fe_avg12_", "click_history_months")
 
 def shift_month(date_str, months):
     return (datetime.strptime(date_str, "%Y-%m-%d") + relativedelta(months=months)).strftime("%Y-%m-%d")
@@ -96,6 +98,7 @@ def compute_drift(run_date_str, preds, feature_store_directory, model_store_dire
                 rows.append({**base, "item_type": "feature", "item": c, "psi": psi_categorical(ref_df[c], cur_features[c])})
     df = pd.DataFrame(rows)
     df["status"] = df["psi"].map(psi_status)
+    df["alert_eligible"] = ~df["item"].str.startswith(INFO_ONLY_FEATURES)
     return df
 
 
@@ -162,7 +165,7 @@ def previous_breach(run_date_str, monitoring_directory):
 # ---------- orchestration ----------
 
 SUMMARY_COLS = ["run_month", "arm", "drift_cohort", "drift_model_version", "score_psi", "score_psi_status",
-                "max_feature_psi", "max_feature", "n_feature_watch", "n_feature_alert",
+                "max_feature_psi", "max_feature", "n_feature_watch", "n_feature_alert", "info_feature_max_psi",
                 "perf_cohort", "perf_model_version", "val_auc", "n_loans", "default_rate", "auc", "ks",
                 "flagged_rate", "precision", "recall", "tp", "fp", "fn", "tn", "auc_rolling3", "expected_auc_rolling3", "auc_alert_level",
                 "perf_breach", "perf_trigger", "psi_alert", "retrain_trigger", "status"]
@@ -195,12 +198,14 @@ def run_monitoring(run_date_str, feature_store_directory, label_store_directory,
             s = d[d["item_type"] == "score"].iloc[0]
             row.update({"drift_cohort": s["cohort"], "drift_model_version": s["model_version"],
                         "score_psi": s["psi"], "score_psi_status": s["status"]})
-            f = drift[drift["item_type"] == "feature"]
+            f = drift[(drift["item_type"] == "feature") & drift["alert_eligible"]]
+            info = drift[(drift["item_type"] == "feature") & ~drift["alert_eligible"]]
             if arm == "champion" and len(f):
                 top = f.loc[f["psi"].idxmax()]
                 row.update({"max_feature_psi": top["psi"], "max_feature": top["item"],
                             "n_feature_watch": int((f["status"] == "watch").sum()),
-                            "n_feature_alert": int((f["status"] == "alert").sum())})
+                            "n_feature_alert": int((f["status"] == "alert").sum()),
+                            "info_feature_max_psi": float(info["psi"].max()) if len(info) else np.nan})
         row.update(perf.get(arm, {}))
         breach = bool(row["perf_breach"]) if not pd.isna(row["perf_breach"]) else False
         row["perf_breach"] = breach

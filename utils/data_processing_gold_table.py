@@ -14,6 +14,7 @@ import argparse
 from pyspark.sql.functions import col
 from pyspark.sql.types import StringType, IntegerType, FloatType, DateType
 
+CLICK_HISTORY_MONTHS = 12   # clickstream is averaged over this many monthly snapshots, ending at the application month - adopt from past work given by Prof.
 
 def process_labels_gold_table(snapshot_date_str, silver_loan_daily_directory, gold_label_store_directory, spark, dpd, mob):
     
@@ -67,10 +68,26 @@ def process_features_gold_table(snapshot_date_str, silver_loan_daily_directory, 
     df_attr  = spark.read.parquet(silver_attributes_directory + "silver_attributes_daily_" + suffix).drop("snapshot_date")
     df_fin   = spark.read.parquet(silver_financials_directory + "silver_financials_daily_" + suffix).drop("snapshot_date")
 
+    # 3b. Clickstream history: mean of each column over the last 12 monthly snapshots up to and including the
+    # application month. Only months <= snapshot_date are read, so nothing from the future can leak in
+    snapshot_date = datetime.strptime(snapshot_date_str, "%Y-%m-%d")
+    history_paths = []
+    for k in range(CLICK_HISTORY_MONTHS):
+        month_str = (snapshot_date - relativedelta(months=k)).strftime("%Y_%m_%d")
+        path = silver_clickstream_directory + "silver_clickstream_daily_" + month_str + ".parquet"
+        if os.path.exists(path):
+            history_paths.append(path)
+    df_history = spark.read.parquet(*history_paths)
+    fe_cols = [c for c in df_history.columns if c.startswith("fe_")]
+    df_history = df_history.groupBy("Customer_ID").agg(
+        *[F.avg(c).alias("fe_avg12_" + c.replace("fe_", "")) for c in fe_cols],
+        F.count("*").alias("click_history_months"))
+
     # 4. Join, new loans are the anchor (left joins preserve every loan)
     df = df.join(df_attr, on="Customer_ID", how="left")
     df = df.join(df_fin, on="Customer_ID", how="left")
     df = df.join(df_click, on="Customer_ID", how="left")
+    df = df.join(df_history, on="Customer_ID", how="left")
 
     # 5. Feature engineering #1 - based on Singapore's MOM person lifecycle
     df = df.withColumn("age_bucket",
