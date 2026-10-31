@@ -130,6 +130,34 @@ def chart_heatmap(drift_detail, top_n=15):
     return to_png_base64(fig)
 
 
+def chart_confusion(perf):
+    # pooled over every matured cohort so far, at the threshold saved with each model
+    fig, axes = plt.subplots(1, 2, figsize=(7.6, 3.6))
+    fig.suptitle("Confusion matrix at the saved threshold (all matured cohorts pooled)", fontsize=11, x=0.01, ha="left")
+    for ax, arm in zip(axes, ["champion", "control"]):
+        g = perf[perf["arm"] == arm] if not perf.empty else perf
+        ax.set_title(arm, fontsize=10)
+        if g.empty or g["tp"].isna().all():
+            no_data(ax)
+            ax.axis("off")
+            continue
+        tp, fp, fn, tn = (int(g[c].sum()) for c in ["tp", "fp", "fn", "tn"])
+        counts = np.array([[tn, fp], [fn, tp]])
+        row_share = counts / counts.sum(axis=1, keepdims=True)
+        ax.imshow(row_share, cmap="Blues", vmin=0, vmax=1)
+        for i in range(2):
+            for j in range(2):
+                ax.text(j, i, f"{counts[i, j]:,}\n{row_share[i, j]:.0%} of row", ha="center", va="center", fontsize=9,
+                        color="white" if row_share[i, j] > 0.6 else "#222222")
+        ax.set_xticks([0, 1])
+        ax.set_xticklabels(["not flagged", "flagged"], fontsize=8)
+        ax.set_yticks([0, 1])
+        ax.set_yticklabels(["did not default", "defaulted"], fontsize=8)
+        ax.set_xlabel(f"precision {tp / (tp + fp):.0%}  |  recall {tp / (tp + fn):.0%}  |  false alarms {fp / (fp + tn):.0%}", fontsize=8)
+    fig.tight_layout(rect=(0, 0, 1, 0.93))
+    return to_png_base64(fig)
+
+
 def fmt(v, digits=3):
     if v is None or (isinstance(v, float) and np.isnan(v)):
         return "&ndash;"
@@ -205,10 +233,11 @@ def build_report(monitoring_directory, output_path):
         ("Performance (needs outcomes, so it appears 6 months after scoring)", [
             (chart_auc(perf), "Each point is a monthly cohort scored when the loans were applied for and evaluated once outcomes arrived. The champion line is the managed model, the control is the frozen first model. The red dotted line is the alert level: validation AUC of the model minus 0.05. A retrain trigger needs the rolling AUC below it two months in a row."),
             (chart_ks(perf), "KS is the largest gap between the cumulative score curves of defaulters and non-defaulters. Higher means the score separates the two groups better."),
-            (chart_rates(perf), "Share of loans flagged high risk against the share that actually defaulted, and the precision of the flags.")]),
+            (chart_rates(perf), "Share of loans flagged high risk against the share that actually defaulted, and the precision of the flags."),
+            (chart_confusion(perf), "Rows are what really happened, columns are what the model said. Bottom-right: defaulters correctly flagged. Top-right: good customers flagged by mistake (false alarms). Bottom-left: defaulters the model missed. Precision is the share of flagged loans that really default; recall is the share of defaulters that get flagged; false alarms is the share of good customers that get flagged.")]),
         ("Drift (no outcomes needed, available in the month of scoring)", [
-            (chart_psi(drift_sum), "PSI compares the live month with the model's training window. Below 0.10 is stable, 0.10 to 0.25 is watch, above 0.25 is alert. With about 500 loans a month, PSI of 0.02 to 0.05 is normal noise."),
-            (chart_heatmap(detail), "Feature-level PSI for the champion. Darker means more change; the colour scale reaches full red at the 0.25 alert level.")]),
+            (chart_psi(drift_sum), "PSI measures stability, not accuracy. On the features it asks whether this month's applicants look like the customers the model was trained on (input stability); on the score it asks whether the model's output has shifted (output stability). Below 0.10 is stable, 0.10 to 0.25 is watch, above 0.25 is alert. With about 500 loans a month, PSI of 0.02 to 0.05 is normal noise."),
+            (chart_heatmap(detail), "Feature-level PSI for the champion: how stable each input is compared with the training window. Darker means the applicants changed more on that feature; the colour scale reaches full red at the 0.25 alert level.")]),
     ]
     body = ""
     for title, items in sections:
