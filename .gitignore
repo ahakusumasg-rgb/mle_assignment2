@@ -29,3 +29,6 @@ Untitled*.ipynb
 # Mine not to publish
 docs/
 model_store/*/
+model_store/champion.json
+model_store/promotion_history.jsonl
+model_store/adhoc_trigger_log.jsonl
